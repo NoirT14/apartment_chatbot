@@ -1,0 +1,66 @@
+name: CI/CD Chatbot (Python)
+
+on:
+  push:
+    branches: [mainmain]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1️⃣ Checkout source
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2️⃣ (Optional) Python lint / test sau này
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # 🧹 Dọn thư mục tmp trên server (GIỐNG .NET)
+      - name: Cleanup tmp folder on server
+        uses: appleboy/ssh-action@v1.2.4
+        with:
+          host: ${{ secrets.DO_HOST }}
+          username: ${{ secrets.DO_USER }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          script: |
+            rm -rf ${{ secrets.DEPLOY_BASE }}/tmp/*
+            mkdir -p ${{ secrets.DEPLOY_BASE }}/tmp
+
+      # 📦 Copy toàn bộ source code sang tmp
+      - name: Copy source code to server
+        uses: appleboy/scp-action@v0.1.5
+        with:
+          host: ${{ secrets.DO_HOST }}
+          username: ${{ secrets.DO_USER }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          source: "." # gửi toàn bộ repo
+          target: "${{ secrets.DEPLOY_BASE }}/tmp"
+          strip_components: 1
+
+      # 🚀 Deploy: replace current + docker compose restart
+      - name: Deploy and restart Chatbot service
+        uses: appleboy/ssh-action@v1.2.4
+        with:
+          host: ${{ secrets.DO_HOST }}
+          username: ${{ secrets.DO_USER }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          script: |
+            cd ${{ secrets.DEPLOY_BASE }}
+
+            echo "Stopping chatbot container..."
+            docker compose down || true
+
+            echo "Replacing current source..."
+            rm -rf current/*
+            cp -r tmp/* current/
+
+            echo "Building & starting chatbot..."
+            docker compose build
+            docker compose up -d
+
+            echo "Checking container status..."
+            docker ps | grep chatbot || true

@@ -13,13 +13,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2️⃣ (Optional) Python lint / test sau này
+      # 2️⃣ Setup Python (để sau này test/lint nếu cần)
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # 🧹 Dọn thư mục tmp trên server (GIỐNG .NET)
+      # 🧹 Cleanup tmp trên server
       - name: Cleanup tmp folder on server
         uses: appleboy/ssh-action@v1.2.4
         with:
@@ -27,8 +27,8 @@ jobs:
           username: ${{ secrets.DO_USER }}
           key: ${{ secrets.DO_SSH_KEY }}
           script: |
-            rm -rf ${{ secrets.DEPLOY_BASE }}/tmp/*
-            mkdir -p ${{ secrets.DEPLOY_BASE }}/tmp
+            rm -rf /home/docker-compose/tmp/*
+            mkdir -p /home/docker-compose/tmp
 
       # 📦 Copy toàn bộ source code sang tmp
       - name: Copy source code to server
@@ -37,30 +37,38 @@ jobs:
           host: ${{ secrets.DO_HOST }}
           username: ${{ secrets.DO_USER }}
           key: ${{ secrets.DO_SSH_KEY }}
-          source: "." # gửi toàn bộ repo
-          target: "${{ secrets.DEPLOY_BASE }}/tmp"
+          source: "."
+          target: "/home/docker-compose/tmp"
           strip_components: 1
 
-      # 🚀 Deploy: replace current + docker compose restart
-      - name: Deploy and restart Chatbot service
+      # 🚀 Deploy chatbot (KHÔNG đụng postgres / keycloak)
+      - name: Deploy and restart Chatbot
         uses: appleboy/ssh-action@v1.2.4
         with:
           host: ${{ secrets.DO_HOST }}
           username: ${{ secrets.DO_USER }}
           key: ${{ secrets.DO_SSH_KEY }}
           script: |
-            cd ${{ secrets.DEPLOY_BASE }}
+            cd /home/docker-compose
 
-            echo "Stopping chatbot container..."
-            docker compose down || true
+            echo "Stopping chatbot..."
+            docker compose stop chatbot || true
+            docker compose rm -f chatbot || true
 
-            echo "Replacing current source..."
+            echo "Replacing chatbot source..."
             rm -rf current/*
             cp -r tmp/* current/
 
-            echo "Building & starting chatbot..."
-            docker compose build
-            docker compose up -d
+            echo "Building chatbot image..."
+            docker compose build chatbot
 
-            echo "Checking container status..."
-            docker ps | grep chatbot || true
+            echo "Starting chatbot..."
+            docker compose up -d chatbot
+
+            echo "Waiting for chatbot to start..."
+            sleep 5
+
+            echo "Health check chatbot..."
+            curl -f http://127.0.0.1:8001/health
+
+            echo "Chatbot deploy SUCCESS"

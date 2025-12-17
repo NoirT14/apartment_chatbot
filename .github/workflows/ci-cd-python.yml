@@ -13,13 +13,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2️⃣ Setup Python (để sau này test/lint nếu cần)
+      # 2️⃣ Setup Python (không bắt buộc, để đồng bộ pipeline)
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # 🧹 Cleanup tmp trên server
+      # 🧹 Cleanup tmp trên server (DÙNG SUDO)
       - name: Cleanup tmp folder on server
         uses: appleboy/ssh-action@v1.2.4
         with:
@@ -27,8 +27,8 @@ jobs:
           username: ${{ secrets.DO_USER }}
           key: ${{ secrets.DO_SSH_KEY }}
           script: |
-            rm -rf /home/docker-compose/tmp/*
-            mkdir -p /home/docker-compose/tmp
+            sudo rm -rf /home/docker-compose/tmp/*
+            sudo mkdir -p /home/docker-compose/tmp
 
       # 📦 Copy toàn bộ source code sang tmp
       - name: Copy source code to server
@@ -41,7 +41,7 @@ jobs:
           target: "/home/docker-compose/tmp"
           strip_components: 1
 
-      # 🚀 Deploy chatbot (KHÔNG đụng postgres / keycloak)
+      # 🚀 Deploy chatbot (CHỈ restart chatbot, không đụng service khác)
       - name: Deploy and restart Chatbot
         uses: appleboy/ssh-action@v1.2.4
         with:
@@ -52,20 +52,20 @@ jobs:
             cd /home/docker-compose
 
             echo "Stopping chatbot..."
-            docker compose stop chatbot || true
-            docker compose rm -f chatbot || true
+            sudo docker compose stop chatbot || true
+            sudo docker compose rm -f chatbot || true
 
             echo "Replacing chatbot source..."
-            rm -rf current/*
-            cp -r tmp/* current/
+            sudo rm -rf current/*
+            sudo cp -r tmp/* current/
 
             echo "Building chatbot image..."
-            docker compose build chatbot
+            sudo docker compose build chatbot
 
             echo "Starting chatbot..."
-            docker compose up -d chatbot
+            sudo docker compose up -d chatbot
 
-            echo "Waiting for chatbot to start..."
+            echo "Waiting for chatbot..."
             sleep 5
 
             echo "Health check chatbot..."

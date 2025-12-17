@@ -62,6 +62,8 @@ jobs:
               --name chatbot \
               -p 127.0.0.1:8001:8000 \
               --restart unless-stopped \
+              --restart unless-stopped \
+              --env-file .env \
               chatbot
 
             echo "Health check..."

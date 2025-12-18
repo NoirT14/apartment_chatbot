@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Install system deps
+# System deps
 RUN apt-get update && apt-get install -y \
     unixodbc \
     unixodbc-dev \
@@ -11,13 +11,15 @@ RUN apt-get update && apt-get install -y \
     apt-transport-https \
     && rm -rf /var/lib/apt/lists/*
 
-# Add Microsoft SQL Server ODBC repo
-RUN curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - \
- && curl https://packages.microsoft.com/config/debian/12/prod.list \
+# Add Microsoft repo (Debian 12)
+RUN curl https://packages.microsoft.com/keys/microsoft.asc \
+    | gpg --dearmor > /usr/share/keyrings/microsoft.gpg \
+ && echo "deb [signed-by=/usr/share/keyrings/microsoft.gpg] \
+    https://packages.microsoft.com/debian/12/prod bookworm main" \
     > /etc/apt/sources.list.d/mssql-release.list
 
-# Install SQL Server ODBC Driver 17
-RUN apt-get update && ACCEPT_EULA=Y apt-get install -y msodbcsql17
+# Install SQL Server ODBC Driver 18 (CHUẨN)
+RUN apt-get update && ACCEPT_EULA=Y apt-get install -y msodbcsql18
 
 WORKDIR /app
 
@@ -25,7 +27,5 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-
-EXPOSE 8000
 
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

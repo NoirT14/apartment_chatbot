@@ -14,7 +14,7 @@ class Database:
         self.username = os.getenv('DB_USER')
         self.password = os.getenv('DB_PASSWORD')
         self.connection_string = (
-            f'DRIVER={{ODBC Driver 17 for SQL Server}};'
+            f'DRIVER={{ODBC Driver 18 for SQL Server}};'
             f'SERVER={self.server};'
             f'DATABASE={self.database};'
             f'UID={self.username};'

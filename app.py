@@ -3,11 +3,13 @@
 FastAPI Backend cho Apartment Chatbot
 Để tích hợp với ReactJS frontend
 """
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple
 from gemini_bot import GeminiChatbot
+from middleware.auth_middleware import JWTAuthMiddleware
+from schema.schema_context import get_current_schema
 import uuid
 
 # Khởi tạo FastAPI app
@@ -26,9 +28,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# JWT Authentication Middleware - Phải add sau CORS
+app.add_middleware(JWTAuthMiddleware)
+
 # Lưu trữ chat sessions cho nhiều users
-# Key: session_id, Value: GeminiChatbot instance
-chat_sessions: Dict[str, GeminiChatbot] = {}
+# Key: session_id, Value: (GeminiChatbot instance, schema_name)
+chat_sessions: Dict[str, Tuple[GeminiChatbot, Optional[str]]] = {}
 
 # ==================== REQUEST/RESPONSE MODELS ====================
 
@@ -68,7 +73,7 @@ async def root():
     }
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, http_request: Request):
     """
     Endpoint chính để chat với bot
 
@@ -77,16 +82,46 @@ async def chat(request: ChatRequest):
         "message": "Có những tiện ích gì?",
         "session_id": "optional-uuid"  // Nếu không có sẽ tạo mới
     }
+    
+    Headers:
+        Authorization: Bearer <JWT_TOKEN>  // Optional, nếu không có sẽ chỉ giới thiệu website
     """
     try:
+        # Lấy schema từ context (đã được set bởi middleware)
+        schema_name = get_current_schema()
+        
         # Lấy hoặc tạo session
         session_id = request.session_id
-        if not session_id or session_id not in chat_sessions:
+        
+        # Xử lý session dựa trên authentication state
+        # Case 1: Không có schema (chưa đăng nhập) - tạo unauthenticated session
+        if schema_name is None:
+            # Xóa session cũ nếu có
+            if session_id and session_id in chat_sessions:
+                del chat_sessions[session_id]
+            
+            # Tạo session mới cho unauthenticated user
             session_id = str(uuid.uuid4())
-            chat_sessions[session_id] = GeminiChatbot()
-
-        # Lấy chatbot instance cho session này
-        chatbot = chat_sessions[session_id]
+            chatbot = GeminiChatbot(schema_name=None)
+            chat_sessions[session_id] = (chatbot, None)
+        
+        # Case 2: Có schema (đã đăng nhập) nhưng chưa có session
+        elif not session_id or session_id not in chat_sessions:
+            if not session_id:
+                session_id = str(uuid.uuid4())
+            chatbot = GeminiChatbot(schema_name=schema_name)
+            chat_sessions[session_id] = (chatbot, schema_name)
+        
+        # Case 3: Có schema và có session cũ
+        else:
+            chatbot, old_schema = chat_sessions[session_id]
+            
+            # Nếu schema thay đổi, reset chatbot với schema mới
+            if old_schema != schema_name:
+                if chatbot and chatbot.chat_session:
+                    chatbot.start_new_conversation()
+                chatbot = GeminiChatbot(schema_name=schema_name)
+                chat_sessions[session_id] = (chatbot, schema_name)
 
         # Gọi chatbot
         result = chatbot.chat(request.message)
@@ -112,8 +147,12 @@ async def chat(request: ChatRequest):
 @app.post("/session/new", response_model=SessionResponse)
 async def create_session():
     """Tạo session mới cho user"""
+    # Lấy schema từ context
+    schema_name = get_current_schema()
+    
     session_id = str(uuid.uuid4())
-    chat_sessions[session_id] = GeminiChatbot()
+    chatbot = GeminiChatbot(schema_name=schema_name)
+    chat_sessions[session_id] = (chatbot, schema_name)
 
     return SessionResponse(
         session_id=session_id,
@@ -133,7 +172,8 @@ async def delete_session(session_id: str):
 async def reset_session(session_id: str):
     """Reset conversation trong session (giữ nguyên session_id)"""
     if session_id in chat_sessions:
-        chat_sessions[session_id].start_new_conversation()
+        chatbot, schema_name = chat_sessions[session_id]
+        chatbot.start_new_conversation()
         return {"message": f"Session {session_id} reset successfully"}
     else:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -141,10 +181,20 @@ async def reset_session(session_id: str):
 @app.get("/sessions")
 async def get_sessions():
     """Xem tất cả sessions đang active (cho debug)"""
+    sessions_info = []
+    for sid, (bot, schema) in chat_sessions.items():
+        sessions_info.append({
+            "session_id": sid,
+            "schema": schema,
+            "is_authenticated": schema is not None
+        })
+    
     return {
         "total_sessions": len(chat_sessions),
-        "session_ids": list(chat_sessions.keys())
+        "session_ids": list(chat_sessions.keys()),
+        "sessions": sessions_info
     }
+
 
 # ==================== HEALTH CHECK ====================
 

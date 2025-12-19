@@ -2,6 +2,7 @@ import google.generativeai as genai
 import os
 import json
 from dotenv import load_dotenv
+from typing import Optional
 from api_endpoints import apartment_api
 
 load_dotenv()
@@ -282,8 +283,8 @@ FUNCTION_DECLARATIONS = [
                 },
                 "status": {
                     "type": "string",
-                    "enum": ["ACTIVE", "OWNED"],
-                    "description": "Trạng thái: ACTIVE (còn trống), OWNED (đã sở hữu)"
+                    "enum": ["AVAILABLE", "OCCUPIED", "RESERVED", "MAINTENANCE"],
+                    "description": "Trạng thái: AVAILABLE (còn trống), OCCUPIED (đã thuê), RESERVED (đã đặt), MAINTENANCE (bảo trì)"
                 },
                 "apartment_type": {
                     "type": "string",
@@ -336,7 +337,7 @@ FUNCTION_DECLARATIONS = [
     {
         "name": "get_available_apartments",
         "description": """
-        Lấy danh sách căn hộ còn trống (ACTIVE).
+        Lấy danh sách căn hộ còn trống (AVAILABLE).
 
         Dùng khi user hỏi:
         - "căn hộ còn trống", "available apartments"
@@ -400,12 +401,22 @@ FUNCTION_MAP = {
 }
 
 class GeminiChatbot:
-    def __init__(self):
+    def __init__(self, schema_name: Optional[str] = None):
+        """
+        Khởi tạo chatbot
+        
+        Args:
+            schema_name: Schema name nếu đã đăng nhập, None nếu chưa đăng nhập
+        """
         self.chat_session = None  # Lưu chat session để nhớ lịch sử
-        self.model = genai.GenerativeModel(
-            model_name='gemini-2.5-flash',
-            tools=[{"function_declarations": FUNCTION_DECLARATIONS}],
-            system_instruction="""
+        self.schema_name = schema_name
+        self.is_authenticated = schema_name is not None
+        
+        
+        # System instruction khác nhau tùy vào authentication state
+        if self.is_authenticated:
+            # Authenticated mode: Có đầy đủ tools để query database
+            system_instruction = """
             Bạn là trợ lý ảo thông minh cho hệ thống quản lý chung cư.
 
             NHIỆM VỤ CHÍNH:
@@ -453,6 +464,42 @@ class GeminiChatbot:
             - Ngắn gọn, không dài dòng
             - Sử dụng emoji phù hợp để thân thiện hơn 💰📊🏊‍♂️🏋️
             """
+            tools = [{"function_declarations": FUNCTION_DECLARATIONS}]
+        else:
+            # Unauthenticated mode: Chỉ giới thiệu website, KHÔNG có tools
+            system_instruction = """
+            Bạn là trợ lý ảo giới thiệu về hệ thống quản lý chung cư.
+
+            NHIỆM VỤ CHÍNH:
+            1. Giới thiệu về website/dịch vụ quản lý chung cư
+            2. Hướng dẫn đăng nhập để truy cập dữ liệu
+            3. Trả lời câu hỏi chung về chung cư (KHÔNG có dữ liệu cụ thể từ database)
+
+            CÁC CHỦ ĐỀ CÓ THỂ TRẢ LỜI:
+            - Giới thiệu về hệ thống quản lý chung cư
+            - Các tính năng của website
+            - Hướng dẫn đăng nhập
+            - Câu hỏi chung về chung cư (không cần dữ liệu cụ thể)
+
+            QUY TẮC QUAN TRỌNG:
+            1. KHÔNG được gọi bất kỳ function nào để query database
+            2. Nếu user hỏi về dữ liệu cụ thể (giá phí, căn hộ, tiện ích...):
+               → Nhắc họ: "Để xem thông tin chi tiết, vui lòng đăng nhập vào hệ thống."
+            3. Giữ thái độ thân thiện, chào mừng
+            4. Trả lời bằng tiếng Việt thân thiện, dễ hiểu
+            5. Hỗ trợ cả tiếng Việt và English
+
+            VÍ DỤ CÂU TRẢ LỜI:
+            - "Chào bạn! Tôi là trợ lý ảo của hệ thống quản lý chung cư. Tôi có thể giúp bạn tìm hiểu về hệ thống và hướng dẫn đăng nhập."
+            - "Để xem thông tin chi tiết về phí dịch vụ, căn hộ, tiện ích... vui lòng đăng nhập vào hệ thống."
+            - "Hệ thống của chúng tôi cung cấp các tính năng: quản lý phí dịch vụ, tiện ích chung cư, thông tin căn hộ..."
+            """
+            tools = []  # Không có tools cho unauthenticated mode
+        
+        self.model = genai.GenerativeModel(
+            model_name='gemini-2.5-flash',
+            tools=tools,
+            system_instruction=system_instruction
         )
     
     def start_new_conversation(self):
@@ -486,13 +533,44 @@ class GeminiChatbot:
             function_calls_log = []
             all_data = {}
             
-            # Xử lý function calling (có thể gọi nhiều functions)
-            while response.candidates[0].content.parts[0].function_call:
-                function_call = response.candidates[0].content.parts[0].function_call
-                function_name = function_call.name
-                function_args = dict(function_call.args)
+            # Xử lý function calling (chỉ khi đã authenticated và có tools)
+            # Check nếu response có function_call
+            def has_function_call(resp):
+                """Helper function để check xem response có function_call không"""
+                try:
+                    if (resp.candidates and 
+                        len(resp.candidates) > 0 and
+                        resp.candidates[0].content.parts and 
+                        len(resp.candidates[0].content.parts) > 0):
+                        part = resp.candidates[0].content.parts[0]
+                        return hasattr(part, 'function_call') and part.function_call is not None
+                except:
+                    pass
+                return False
+            
+            # Xử lý function calling (chỉ khi authenticated và có tools)
+            while has_function_call(response):
+                # Double check: Nếu không authenticated, block ngay
+                if not self.is_authenticated:
+                    break
                 
-                print(f"🔧 Calling: {function_name}({function_args})")
+                function_call = response.candidates[0].content.parts[0].function_call
+                
+                # Validate function_call
+                if not function_call or not hasattr(function_call, 'name'):
+                    break
+                
+                function_name = function_call.name
+                
+                # Validate function_name không được rỗng
+                if not function_name or function_name.strip() == "":
+                    break
+                
+                # Xử lý args - có thể là None hoặc không có
+                if hasattr(function_call, 'args') and function_call.args is not None:
+                    function_args = dict(function_call.args)
+                else:
+                    function_args = {}
                 
                 # Log function call
                 function_calls_log.append({
@@ -507,19 +585,20 @@ class GeminiChatbot:
                 else:
                     api_result = {"error": f"Function {function_name} not found"}
                 
-                print(f"📊 Result: {api_result.get('count', 'N/A')} records")
-                
                 # Trả kết quả cho Gemini (sử dụng chat session hiện tại)
-                response = self.chat_session.send_message(
-                    genai.protos.Content(
-                        parts=[genai.protos.Part(
-                            function_response=genai.protos.FunctionResponse(
-                                name=function_name,
-                                response={"result": api_result}
-                            )
-                        )]
+                if function_name and function_name.strip():
+                    response = self.chat_session.send_message(
+                        genai.protos.Content(
+                            parts=[genai.protos.Part(
+                                function_response=genai.protos.FunctionResponse(
+                                    name=function_name,
+                                    response={"result": api_result}
+                                )
+                            )]
+                        )
                     )
-                )
+                else:
+                    break
             
             # Lấy câu trả lời cuối cùng
             final_response = response.text
@@ -542,5 +621,4 @@ class GeminiChatbot:
                 "error": str(e)
             }
 
-# Create instance
-chatbot = GeminiChatbot()
+# Note: Không tạo instance global nữa vì mỗi session sẽ có instance riêng với schema riêng

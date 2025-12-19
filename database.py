@@ -2,6 +2,7 @@ import pyodbc
 import os
 from dotenv import load_dotenv
 from typing import List, Dict, Any
+from schema.schema_context import get_current_schema
 
 # Load environment variables
 load_dotenv()
@@ -30,8 +31,43 @@ class Database:
             print(f"❌ Lỗi kết nối database: {e}")
             raise
     
+    def _inject_schema(self, query: str) -> str:
+        """
+        Inject schema name vào query
+        
+        Thay thế {schema} placeholder bằng schema name từ context
+        
+        Args:
+            query: SQL query với {schema} placeholder
+            
+        Returns:
+            Query đã được inject schema
+            
+        Raises:
+            ValueError: Nếu không có schema (chưa đăng nhập)
+        """
+        schema = get_current_schema()
+        
+        if schema is None:
+            raise ValueError(
+                "Cannot execute query: No schema context. "
+                "User must be authenticated to access database."
+            )
+        
+        # Replace {schema} placeholder với schema name
+        query = query.replace('{schema}', schema)
+        
+        return query
+    
     def execute_query(self, query: str, params: tuple = None) -> List[Dict[str, Any]]:
-        """Thực thi SELECT query và trả về kết quả dạng list of dict"""
+        """
+        Thực thi SELECT query và trả về kết quả dạng list of dict
+        
+        Tự động inject schema vào query trước khi execute
+        """
+        # Inject schema vào query
+        query = self._inject_schema(query)
+        
         conn = self.get_connection()
         cursor = conn.cursor()
         
@@ -58,7 +94,14 @@ class Database:
             conn.close()
     
     def execute_non_query(self, query: str, params: tuple = None) -> int:
-        """Thực thi INSERT/UPDATE/DELETE query"""
+        """
+        Thực thi INSERT/UPDATE/DELETE query
+        
+        Tự động inject schema vào query trước khi execute
+        """
+        # Inject schema vào query
+        query = self._inject_schema(query)
+        
         conn = self.get_connection()
         cursor = conn.cursor()
         

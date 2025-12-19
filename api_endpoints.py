@@ -2,9 +2,27 @@ from database import db
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta, date
 from decimal import Decimal
+from schema.schema_context import has_schema
 
 class ApartmentAPI:
     """API endpoints để truy vấn dữ liệu apartment management system"""
+    
+    @staticmethod
+    def _check_authentication() -> Optional[Dict[str, Any]]:
+        """
+        Check xem có schema (đã đăng nhập) chưa
+        
+        Returns:
+            None nếu đã authenticated, dict error nếu chưa
+        """
+        if not has_schema():
+            return {
+                "success": False,
+                "error": "Authentication required. Please login to access this data.",
+                "data": [],
+                "count": 0
+            }
+        return None
     
     @staticmethod
     def _convert_to_serializable(data: Any) -> Any:
@@ -43,6 +61,11 @@ class ApartmentAPI:
         Returns:
             Dict với data và count
         """
+        # Check authentication
+        auth_error = ApartmentAPI._check_authentication()
+        if auth_error:
+            return auth_error
+        
         query = """
         SELECT 
             st.service_type_id,
@@ -53,8 +76,8 @@ class ApartmentAPI:
             st.is_recurring,
             st.is_active,
             c.name as category_name
-        FROM building.service_types st
-        LEFT JOIN building.service_type_categories c ON st.category_id = c.category_id
+        FROM {schema}.service_types st
+        LEFT JOIN {schema}.service_type_categories c ON st.category_id = c.category_id
         WHERE st.is_active = 1 AND st.is_delete = 0
         """
         params = []
@@ -100,6 +123,11 @@ class ApartmentAPI:
         Returns:
             Dict với data và count
         """
+        # Check authentication
+        auth_error = ApartmentAPI._check_authentication()
+        if auth_error:
+            return auth_error
+        
         query = """
         SELECT 
             st.code as service_code,
@@ -109,8 +137,8 @@ class ApartmentAPI:
             sp.effective_date,
             sp.end_date,
             sp.status
-        FROM building.service_prices sp
-        INNER JOIN building.service_types st ON sp.service_type_id = st.service_type_id
+        FROM {schema}.service_prices sp
+        INNER JOIN {schema}.service_types st ON sp.service_type_id = st.service_type_id
         WHERE 1=1
         """
         params = []
@@ -166,6 +194,11 @@ class ApartmentAPI:
         Returns:
             Dict với thông tin tính toán
         """
+        # Check authentication
+        auth_error = ApartmentAPI._check_authentication()
+        if auth_error:
+            return auth_error
+        
         # Lấy giá hiện tại
         query = """
         SELECT TOP 1
@@ -173,8 +206,8 @@ class ApartmentAPI:
             st.name,
             st.unit,
             sp.unit_price
-        FROM building.service_prices sp
-        INNER JOIN building.service_types st ON sp.service_type_id = st.service_type_id
+        FROM {schema}.service_prices sp
+        INNER JOIN {schema}.service_types st ON sp.service_type_id = st.service_type_id
         WHERE st.code = ?
             AND sp.status = 'APPROVED'
             AND sp.effective_date <= GETDATE()
@@ -226,12 +259,17 @@ class ApartmentAPI:
         Returns:
             Dict với data và count
         """
+        # Check authentication
+        auth_error = ApartmentAPI._check_authentication()
+        if auth_error:
+            return auth_error
+        
         query = """
         SELECT 
             category_id,
             name,
             description
-        FROM building.service_type_categories
+        FROM {schema}.service_type_categories
         ORDER BY name
         """
         
@@ -274,6 +312,11 @@ class ApartmentAPI:
         Returns:
             Dict với data và count
         """
+        # Check authentication
+        auth_error = ApartmentAPI._check_authentication()
+        if auth_error:
+            return auth_error
+        
         query = """
         SELECT
             amenity_id,
@@ -286,7 +329,7 @@ class ApartmentAPI:
             status,
             requires_face_verification,
             asset_id
-        FROM building.amenities
+        FROM {schema}.amenities
         WHERE is_delete = 0
         """
         params = []
@@ -358,6 +401,11 @@ class ApartmentAPI:
         Returns:
             Dict với thông tin tiện ích và giá gói (nếu có)
         """
+        # Check authentication
+        auth_error = ApartmentAPI._check_authentication()
+        if auth_error:
+            return auth_error
+        
         query = """
         SELECT
             amenity_id,
@@ -370,7 +418,7 @@ class ApartmentAPI:
             status,
             requires_face_verification,
             asset_id
-        FROM building.amenities
+        FROM {schema}.amenities
         WHERE code = ? AND is_delete = 0
         """
 
@@ -425,6 +473,11 @@ class ApartmentAPI:
         Returns:
             Dict với data và count
         """
+        # Check authentication
+        auth_error = ApartmentAPI._check_authentication()
+        if auth_error:
+            return auth_error
+        
         query = """
         SELECT
             ap.package_id,
@@ -438,8 +491,8 @@ class ApartmentAPI:
             ap.status,
             ap.duration_days,
             ap.period_unit
-        FROM building.amenity_packages ap
-        INNER JOIN building.amenities a ON ap.amenity_id = a.amenity_id
+        FROM {schema}.amenity_packages ap
+        INNER JOIN {schema}.amenities a ON ap.amenity_id = a.amenity_id
         WHERE 1=1
         """
         params = []
@@ -492,6 +545,11 @@ class ApartmentAPI:
         Returns:
             Dict với thông tin tính toán
         """
+        # Check authentication
+        auth_error = ApartmentAPI._check_authentication()
+        if auth_error:
+            return auth_error
+        
         query = """
         SELECT TOP 1
             a.code,
@@ -501,8 +559,8 @@ class ApartmentAPI:
             ap.price,
             ap.duration_days,
             ap.period_unit
-        FROM building.amenity_packages ap
-        INNER JOIN building.amenities a ON ap.amenity_id = a.amenity_id
+        FROM {schema}.amenity_packages ap
+        INNER JOIN {schema}.amenities a ON ap.amenity_id = a.amenity_id
         WHERE a.code = ?
             AND ap.month_count = ?
             AND ap.status = 'ACTIVE'
@@ -552,12 +610,17 @@ class ApartmentAPI:
         Returns:
             Dict với data và count
         """
+        # Check authentication
+        auth_error = ApartmentAPI._check_authentication()
+        if auth_error:
+            return auth_error
+        
         query = """
         SELECT
             floor_id,
             floor_number,
             name
-        FROM building.floors
+        FROM {schema}.floors
         ORDER BY floor_number
         """
 
@@ -594,7 +657,7 @@ class ApartmentAPI:
 
         Args:
             floor_number: Số tầng
-            status: Trạng thái (ACTIVE, OWNED)
+            status: Trạng thái (AVAILABLE, OCCUPIED, RESERVED, MAINTENANCE)
             apartment_type: Loại căn hộ (Studio, 1BR, 2BR, 3BR, Penthouse...)
             min_bedrooms: Số phòng ngủ tối thiểu
             max_bedrooms: Số phòng ngủ tối đa
@@ -604,6 +667,11 @@ class ApartmentAPI:
         Returns:
             Dict với data và count
         """
+        # Check authentication
+        auth_error = ApartmentAPI._check_authentication()
+        if auth_error:
+            return auth_error
+        
         query = """
         SELECT
             a.apartment_id,
@@ -617,8 +685,8 @@ class ApartmentAPI:
             a.type,
             a.created_at,
             a.updated_at
-        FROM building.apartments a
-        INNER JOIN building.floors f ON a.floor_id = f.floor_id
+        FROM {schema}.apartments a
+        INNER JOIN {schema}.floors f ON a.floor_id = f.floor_id
         WHERE 1=1
         """
         params = []
@@ -682,6 +750,11 @@ class ApartmentAPI:
         Returns:
             Dict với thông tin căn hộ
         """
+        # Check authentication
+        auth_error = ApartmentAPI._check_authentication()
+        if auth_error:
+            return auth_error
+        
         query = """
         SELECT
             a.apartment_id,
@@ -696,8 +769,8 @@ class ApartmentAPI:
             a.image,
             a.created_at,
             a.updated_at
-        FROM building.apartments a
-        INNER JOIN building.floors f ON a.floor_id = f.floor_id
+        FROM {schema}.apartments a
+        INNER JOIN {schema}.floors f ON a.floor_id = f.floor_id
         WHERE a.number = ?
         """
 
@@ -728,7 +801,7 @@ class ApartmentAPI:
         min_bedrooms: Optional[int] = None
     ) -> Dict[str, Any]:
         """
-        Lấy danh sách căn hộ còn trống (ACTIVE)
+        Lấy danh sách căn hộ còn trống (AVAILABLE)
 
         Args:
             apartment_type: Loại căn hộ
@@ -738,7 +811,7 @@ class ApartmentAPI:
             Dict với data và count
         """
         return ApartmentAPI.get_apartments(
-            status="ACTIVE",
+            status="AVAILABLE",
             apartment_type=apartment_type,
             min_bedrooms=min_bedrooms
         )
@@ -751,15 +824,22 @@ class ApartmentAPI:
         Returns:
             Dict với thông tin thống kê
         """
+        # Check authentication
+        auth_error = ApartmentAPI._check_authentication()
+        if auth_error:
+            return auth_error
+        
         query = """
         SELECT
             COUNT(*) as total_apartments,
-            SUM(CASE WHEN status = 'ACTIVE' THEN 1 ELSE 0 END) as active,
-            SUM(CASE WHEN status = 'OWNED' THEN 1 ELSE 0 END) as owned,
+            SUM(CASE WHEN status = 'AVAILABLE' THEN 1 ELSE 0 END) as available,
+            SUM(CASE WHEN status = 'OCCUPIED' THEN 1 ELSE 0 END) as occupied,
+            SUM(CASE WHEN status = 'RESERVED' THEN 1 ELSE 0 END) as reserved,
+            SUM(CASE WHEN status = 'MAINTENANCE' THEN 1 ELSE 0 END) as maintenance,
             AVG(CAST(area_m2 AS FLOAT)) as avg_area,
             MIN(area_m2) as min_area,
             MAX(area_m2) as max_area
-        FROM building.apartments
+        FROM {schema}.apartments
         """
 
         try:
@@ -772,8 +852,10 @@ class ApartmentAPI:
                     "success": True,
                     "data": {
                         "total_apartments": stats.get('total_apartments', 0),
-                        "active": stats.get('active', 0),
-                        "owned": stats.get('owned', 0),
+                        "available": stats.get('available', 0),
+                        "occupied": stats.get('occupied', 0),
+                        "reserved": stats.get('reserved', 0),
+                        "maintenance": stats.get('maintenance', 0),
                         "avg_area_m2": round(stats.get('avg_area', 0), 2),
                         "min_area_m2": stats.get('min_area', 0),
                         "max_area_m2": stats.get('max_area', 0)
